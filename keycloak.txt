@@ -1,0 +1,198 @@
+Keycloak Integration with Python:
+
+===========================================================================================
+===========================================================================================
+docker-compose.yml
+===========================================================================================
+
+version: '2'
+services:
+  postgresql:
+    image: docker.io/bitnami/postgresql:11
+    environment:
+      # ALLOW_EMPTY_PASSWORD is recommended only for development.
+      - ALLOW_EMPTY_PASSWORD=yes
+      - POSTGRESQL_USERNAME=bn_keycloak
+      - POSTGRESQL_DATABASE=bitnami_keycloak
+    volumes:
+      - 'postgresql_data:/bitnami/postgresql'
+
+  keycloak:
+    image: docker.io/bitnami/keycloak:21
+    depends_on:
+      - postgresql
+    ports:
+      - "80:8080"
+
+volumes:
+  postgresql_data:
+    driver: local
+	
+===========================================================================================
+===========================================================================================
+Initial Setup
+===========================================================================================
+make the docker compose file
+docker compose up
+
+Login with admin console 
+user - bitnami
+change the password for user with difficult password 
+
+
+Create a realm
+import previously have realm or give realm name as ecgvue - enabled true - Create
+
+
+Create Client - (Backend)
+Clients - Create Client - Clientid "backend" - Name "Backend" - Description "This client is for backend access"
+Next - ClientAuthentication True - ServiceAccountRoles True 
+Next - Redirect URL (Not Required)
+Save
+Clinets - backend - settings - frontchannellogout True - BackChannelLogout True 
+						  - credentials - copy client secret and put in our code 
+						  - service accounts roles - assign role - filter by clients - realm-admin - assign 
+						  
+						  
+Create Client - (Frontend)
+Clients - Create Client - Clientid "frontend" - Name "Frontend" - Description "This client is for frontend access"
+Next - StandardFlow True - DirectAccessGrants True 
+Next - Redirect URL (web frontend homepage url)
+		- WebOrigin URL (from which domain we may expect the request will come from eg. front end)
+Save
+===========================================================================================
+===========================================================================================
+check the test code:
+===========================================================================================
+from keycloak import KeycloakAdmin, KeycloakOpenID
+
+
+# Keycloak admin credentials
+keycloak_url = 'http://10.10.2.187/'
+realm_name = 'ecgvue'
+client_id = 'backend'
+client_secret = 'I8Vwuz8UqOwG9NrQteJ09PA6BhnyHXg3'
+
+
+# Initialize KeycloakAdmin instance
+keycloak_admin = KeycloakAdmin(server_url=keycloak_url, client_id=client_id, client_secret_key=client_secret,
+                              realm_name=realm_name, verify=True)
+
+
+print("keycloak admin: ", keycloak_admin)
+print(keycloak_admin.token['access_token'])
+# Create a user
+def create_user_data(username, password, email, first_name, last_name):
+    user_data = {
+        'username': username,
+        'email': email,
+        'firstName': first_name,
+        'lastName': last_name,
+        'enabled': True,
+        'attributes': {"roles": ["CFA", "SPA"]},
+        'credentials': [
+        {
+            'type': 'password',
+            'value': password,
+            'temporary': False
+        }
+    ]
+    }
+    print("input data: ", user_data)
+    
+    message_get = keycloak_admin.create_user(user_data)
+
+    print("message get: ", message_get)
+    return message_get
+
+# Get a user by username or email
+def get_keycloak_user(username):
+    user = keycloak_admin.get_user(username)
+    return user
+
+# Update a user's attributes
+def update_keycloak_user(user_id, new_attributes):
+    keycloak_admin.update_user(user_id, new_attributes)
+
+# Delete a user
+def delete_keycloak_user(user_id):
+    keycloak_admin.delete_user(user_id)
+
+# Example usage
+# Create a user
+new_user_data = create_user_data('john2', 'deepak123', 'john3@example.com', 'John3', 'Doe')
+print("new_user: ", new_user_data)
+
+# Get a user
+user = get_keycloak_user(new_user_data)
+print("one user: ", user)
+
+# Update user attributes
+new_attributes = {
+    'email': 'john2@example.com',
+    'firstName': 'John2'
+}
+
+update_keycloak_user(new_user_data, new_attributes)
+
+# Get a user
+user = get_keycloak_user(new_user_data)
+print("after update: ", user)
+
+
+
+print("first half over ======================================================")
+
+def get_user_details(access_token):
+    try:
+        # Introspect the access token
+        introspection = keycloak_openid.userinfo(access_token)
+        print("introspection: ", introspection)
+        # Check if the token is active
+        if introspection['sub']:
+            user = keycloak_admin.get_user(introspection['sub'])
+            print("this is final user detail: ", user)
+            # Extract relevant user details
+            user_name = user['username']
+            roles = user['attributes']['roles']
+            email = user['email']
+            # Add other user details as needed          
+            # Return the user details as a dictionary
+            user_details = {
+                'roles': roles,
+                'username': user_name,
+                'email': email
+                # Add other user details to the dictionary
+            }
+            print("this is user detail: ", user_details)
+
+            return user_details
+        else:
+            print("Invalid access token")
+            return None
+    
+    except Exception as e:
+        # Handle any exceptions that occur during the process
+        print("Error retrieving user details:", str(e))
+        return None
+    
+# Initialize KeycloakOpenID instance
+keycloak_openid = KeycloakOpenID(server_url=keycloak_url, client_id='frontend', realm_name=realm_name)
+
+user_token = keycloak_openid.token(username='john2', password='deepak123', grant_type='password')
+print("token_user: ", user_token['access_token'])
+user_data = get_user_details(user_token['access_token'])
+
+# Delete a user
+delete_keycloak_user(new_user_data)
+
+
+===========================================================================================
+===========================================================================================
+Some useful links
+===========================================================================================
+http://10.10.2.187/realms/ecgvue/protocol/openid-connect/auth?client_id=frontend
+
+http://10.10.2.187/realms/ecgvue/protocol/openid-connect/auth?client_id=frontend&response_type=code
+
+http://10.10.2.187/realms/ecgvue/protocol/openid-connect/auth?client_id=frontend&response_type=token
